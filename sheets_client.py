@@ -28,10 +28,18 @@ def _load_service_account_secret():
     2) Dạng chuỗi chứa nguyên khối JSON (vẫn hỗ trợ để không bắt buộc đổi lại
        secrets đã dán sẵn trên Streamlit Cloud):
        gcp_service_account = \"\"\" { "type": "service_account", ... } \"\"\"
+
+       Lưu ý: nếu dùng triple-double-quote (\"\"\"), TOML sẽ tự diễn giải các
+       chuỗi \\n bên trong (vd. trong private_key) thành ký tự xuống dòng thật,
+       khiến JSON chuẩn (strict) báo lỗi "Invalid control character". Vì vậy
+       ở đây dùng strict=False để chấp nhận ký tự điều khiển thô trong chuỗi.
     """
     raw = st.secrets["gcp_service_account"]
     if isinstance(raw, str):
-        return json.loads(raw)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return json.loads(raw, strict=False)
     return dict(raw)
 
 
