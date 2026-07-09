@@ -1,6 +1,8 @@
 """
 Module xử lý kết nối và đọc/ghi dữ liệu với Google Sheets bằng gspread + Service Account.
 """
+import json
+
 import gspread
 import pandas as pd
 import streamlit as st
@@ -14,6 +16,25 @@ SCOPES = [
 ]
 
 
+def _load_service_account_secret():
+    """
+    Đọc secret 'gcp_service_account', hỗ trợ cả 2 cách khai báo trong secrets.toml:
+
+    1) Dạng bảng TOML (khuyến nghị):
+       [gcp_service_account]
+       type = "service_account"
+       ...
+
+    2) Dạng chuỗi chứa nguyên khối JSON (vẫn hỗ trợ để không bắt buộc đổi lại
+       secrets đã dán sẵn trên Streamlit Cloud):
+       gcp_service_account = \"\"\" { "type": "service_account", ... } \"\"\"
+    """
+    raw = st.secrets["gcp_service_account"]
+    if isinstance(raw, str):
+        return json.loads(raw)
+    return dict(raw)
+
+
 @st.cache_resource(show_spinner=False)
 def get_client():
     """
@@ -22,7 +43,7 @@ def get_client():
     nếu không có thì đọc từ file JSON local (khi chạy local).
     """
     if "gcp_service_account" in st.secrets:
-        creds_dict = dict(st.secrets["gcp_service_account"])
+        creds_dict = _load_service_account_secret()
         creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
     else:
         creds = Credentials.from_service_account_file(
