@@ -34,6 +34,9 @@ ALL_SHEETS = [
 ]
 
 # Định nghĩa cột (header) cho từng sheet — dùng để tự tạo sheet nếu chưa tồn tại
+# Lưu ý: các cột "thoi_gian_..._ngay" lưu GIÁ TRỊ SỐ theo đơn vị tương ứng
+# (xem cột "..._don_vi" đi kèm ở cuối), không nhất thiết là số ngày — tên cột
+# giữ nguyên để không phá vỡ dữ liệu cũ đã có trên Google Sheet.
 SHEET_HEADERS = {
     SHEET_CONTRACTS: [
         "contract_id", "ten_hop_dong", "so_hop_dong",
@@ -44,6 +47,7 @@ SHEET_HEADERS = {
         "nguon_von",
         "ngay_thanh_ly_thuc_te", "ngay_quyet_toan_thuc_te",
         "ghi_chu",
+        "thoi_gian_giao_hang_don_vi", "thoi_gian_hoan_thanh_dv_don_vi", "thoi_gian_nghiem_thu_thanh_ly_don_vi",
     ],
     SHEET_ITEMS: [
         "contract_id", "item_id", "ten_hang_muc", "loai_hang_muc",
@@ -83,3 +87,7 @@ LOAI_THANH_TOAN = ["Tạm ứng", "Thanh toán"]
 
 # Đơn vị tiền tệ
 DON_VI_TIEN_TE = ["VND", "USD", "EUR"]
+
+# Đơn vị thời gian thực hiện hợp đồng (mặc định: Tháng)
+THOI_GIAN_DON_VI_OPTIONS = ["Ngày", "Tháng", "Năm"]
+THOI_GIAN_DON_VI_MAC_DINH = "Tháng"
