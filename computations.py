@@ -40,18 +40,39 @@ def _to_number(value, default=0):
         return default
 
 
+def _add_duration(start: date, value: float, unit: str) -> date:
+    """Cộng thêm 'value' đơn vị 'unit' (Ngày/Tháng/Năm) vào ngày start, trả về date mới."""
+    value = value or 0
+    if unit == "Năm":
+        return (pd.Timestamp(start) + pd.DateOffset(years=value)).date()
+    if unit == "Tháng":
+        return (pd.Timestamp(start) + pd.DateOffset(months=value)).date()
+    # Mặc định: Ngày
+    return start + pd.Timedelta(days=value)
+
+
 def compute_ngay_het_hieu_luc(contract_row: dict) -> date | None:
-    """Ngày hết hiệu lực = Ngày hiệu lực + MAX(3 loại thời gian thực hiện, tính bằng ngày)."""
+    """
+    Ngày hết hiệu lực = MAX của 3 mốc: Ngày hiệu lực + từng loại thời gian thực hiện,
+    mỗi loại được cộng theo đúng đơn vị (Ngày/Tháng/Năm) đã chọn khi nhập liệu.
+    """
     ngay_hieu_luc = _to_date(contract_row.get("ngay_hieu_luc"))
     if ngay_hieu_luc is None:
         return None
-    durations = [
-        _to_number(contract_row.get("thoi_gian_giao_hang_ngay")),
-        _to_number(contract_row.get("thoi_gian_hoan_thanh_dv_ngay")),
-        _to_number(contract_row.get("thoi_gian_nghiem_thu_thanh_ly_ngay")),
+
+    don_vi_mac_dinh = "Tháng"
+    cap_moc = [
+        (contract_row.get("thoi_gian_giao_hang_ngay"), contract_row.get("thoi_gian_giao_hang_don_vi")),
+        (contract_row.get("thoi_gian_hoan_thanh_dv_ngay"), contract_row.get("thoi_gian_hoan_thanh_dv_don_vi")),
+        (contract_row.get("thoi_gian_nghiem_thu_thanh_ly_ngay"), contract_row.get("thoi_gian_nghiem_thu_thanh_ly_don_vi")),
     ]
-    max_days = max(durations) if durations else 0
-    return ngay_hieu_luc + pd.Timedelta(days=max_days)
+    ngay_ket_thuc_list = []
+    for value, unit in cap_moc:
+        value = _to_number(value)
+        unit = unit if unit in ("Ngày", "Tháng", "Năm") else don_vi_mac_dinh
+        ngay_ket_thuc_list.append(_add_duration(ngay_hieu_luc, value, unit))
+
+    return max(ngay_ket_thuc_list) if ngay_ket_thuc_list else ngay_hieu_luc
 
 
 def compute_trang_thai_hop_dong(contract_row: dict, ngay_het_hieu_luc: date | None) -> str:
