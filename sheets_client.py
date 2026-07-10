@@ -69,16 +69,26 @@ def get_spreadsheet():
 def ensure_sheets_exist():
     """
     Kiểm tra và tự tạo các sheet (tab) còn thiếu, kèm header tương ứng.
+    Với sheet đã tồn tại, nếu thiếu cột mới so với config (vd. thêm đơn vị thời
+    gian), tự động bổ sung cột đó vào CUỐI hàng header — không đụng tới các cột
+    đã có để tránh xáo trộn dữ liệu cũ.
     Gọi 1 lần khi app khởi động.
     """
     ss = get_spreadsheet()
     existing_titles = [ws.title for ws in ss.worksheets()]
 
     for sheet_name in config.ALL_SHEETS:
+        expected_headers = config.SHEET_HEADERS[sheet_name]
         if sheet_name not in existing_titles:
-            headers = config.SHEET_HEADERS[sheet_name]
-            ws = ss.add_worksheet(title=sheet_name, rows=1000, cols=len(headers) + 5)
-            ws.append_row(headers)
+            ws = ss.add_worksheet(title=sheet_name, rows=1000, cols=len(expected_headers) + 5)
+            ws.append_row(expected_headers)
+        else:
+            ws = ss.worksheet(sheet_name)
+            current_headers = ws.row_values(1)
+            missing = [h for h in expected_headers if h not in current_headers]
+            if missing:
+                new_headers = current_headers + missing
+                ws.update("A1", [new_headers], value_input_option="USER_ENTERED")
 
 
 def read_sheet(sheet_name: str) -> pd.DataFrame:
@@ -102,6 +112,36 @@ def append_row(sheet_name: str, row_dict: dict):
     headers = config.SHEET_HEADERS[sheet_name]
     row = [row_dict.get(col, "") for col in headers]
     ws.append_row(row, value_input_option="USER_ENTERED")
+
+
+def append_rows(sheet_name: str, row_dicts: list):
+    """Thêm nhiều dòng cùng lúc (hiệu quả hơn gọi append_row nhiều lần)."""
+    if not row_dicts:
+        return
+    ss = get_spreadsheet()
+    ws = ss.worksheet(sheet_name)
+    headers = config.SHEET_HEADERS[sheet_name]
+    rows = [[row_dict.get(col, "") for col in headers] for row_dict in row_dicts]
+    ws.append_rows(rows, value_input_option="USER_ENTERED")
+
+
+def replace_rows_for_contract(sheet_name: str, contract_id: str, new_rows: list):
+    """
+    Ghi đè toàn bộ dữ liệu của 1 hợp đồng trong 1 sheet (dùng cho bảng động
+    thêm/xóa dòng: Contract_Items, Delivery_Plan, Payment_Plan...).
+
+    Cách làm: giữ nguyên các dòng thuộc hợp đồng KHÁC, xóa hết dòng thuộc
+    contract_id này, rồi ghi lại new_rows (đã là danh sách dict đầy đủ).
+    """
+    ss = get_spreadsheet()
+    ws = ss.worksheet(sheet_name)
+    headers = config.SHEET_HEADERS[sheet_name]
+    all_records = ws.get_all_records()
+    kept = [r for r in all_records if str(r.get("contract_id", "")) != str(contract_id)]
+    combined = kept + new_rows
+    data = [headers] + [[row.get(h, "") for h in headers] for row in combined]
+    ws.clear()
+    ws.update("A1", data, value_input_option="USER_ENTERED")
 
 
 def update_row_by_index(sheet_name: str, row_index: int, row_dict: dict):
