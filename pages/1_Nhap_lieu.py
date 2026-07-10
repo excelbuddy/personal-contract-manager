@@ -1,10 +1,11 @@
-
 """
 Trang Nhập liệu: Hợp đồng mới, danh mục hàng hóa/DV, kế hoạch tạm ứng/thanh toán, kế hoạch bàn giao.
+Danh mục / kế hoạch được nhập theo dạng BẢNG (data_editor) — người dùng chủ động thêm/xóa dòng.
 """
 import uuid
 from datetime import date
 
+import pandas as pd
 import streamlit as st
 
 import config
@@ -13,19 +14,18 @@ import sheets_client
 st.set_page_config(page_title="Nhập liệu Hợp đồng", page_icon="✍️", layout="wide")
 st.title("✍️ Nhập liệu Hợp đồng")
 
-tab_contract, tab_items, tab_payment_plan, tab_delivery_plan = st.tabs(
-    ["Hợp đồng mới", "Danh mục hàng hóa/DV", "Kế hoạch tạm ứng/thanh toán", "Kế hoạch bàn giao"]
+tab_contract, tab_items, tab_delivery_plan, tab_payment_plan = st.tabs(
+    ["Hợp đồng mới", "Danh mục hàng hóa/DV", "Kế hoạch bàn giao", "Kế hoạch tạm ứng/thanh toán"]
 )
 
-# Lấy danh sách hợp đồng hiện có để chọn khi nhập liệu phụ
 contracts_df = sheets_client.read_sheet(config.SHEET_CONTRACTS)
 contract_options = {}
 if not contracts_df.empty:
     for _, row in contracts_df.iterrows():
-        label = f"{row['contract_id']} - {row['ten_hop_dong']}"
-        contract_options[label] = row["contract_id"]
+        if row.get("contract_id"):
+            contract_options[f"{row['contract_id']} - {row['ten_hop_dong']}"] = row["contract_id"]
 
-# ---------------------------------------------------------------------------
+# =============================================================================
 with tab_contract:
     st.subheader("Thêm hợp đồng mới")
     with st.form("form_new_contract", clear_on_submit=True):
@@ -46,14 +46,25 @@ with tab_contract:
             ngay_ky = st.date_input("Ngày ký hợp đồng *", value=date.today())
             ngay_hieu_luc = st.date_input("Ngày hiệu lực hợp đồng *", value=date.today())
 
-        st.markdown("**Thời gian thực hiện (số ngày kể từ ngày hiệu lực)**")
+        st.markdown("**Thời gian thực hiện** (chọn đơn vị: Ngày / Tháng / Năm — mặc định Tháng)")
+        don_vi_index = config.THOI_GIAN_DON_VI_OPTIONS.index(config.THOI_GIAN_DON_VI_MAC_DINH)
+
         col3, col4, col5 = st.columns(3)
         with col3:
-            tg_giao_hang = st.number_input("Thời gian bàn giao hàng hóa (ngày)", min_value=0, step=1)
+            tg_giao_hang = st.number_input("Bàn giao hàng hóa", min_value=0.0, step=1.0)
+            dv_giao_hang = st.selectbox(
+                "Đơn vị", config.THOI_GIAN_DON_VI_OPTIONS, index=don_vi_index, key="dv_giao_hang"
+            )
         with col4:
-            tg_hoan_thanh_dv = st.number_input("Thời gian hoàn thành dịch vụ (ngày)", min_value=0, step=1)
+            tg_hoan_thanh_dv = st.number_input("Hoàn thành dịch vụ", min_value=0.0, step=1.0)
+            dv_hoan_thanh_dv = st.selectbox(
+                "Đơn vị", config.THOI_GIAN_DON_VI_OPTIONS, index=don_vi_index, key="dv_hoan_thanh_dv"
+            )
         with col5:
-            tg_nghiem_thu = st.number_input("Thời gian nghiệm thu/thanh lý (ngày)", min_value=0, step=1)
+            tg_nghiem_thu = st.number_input("Nghiệm thu/thanh lý", min_value=0.0, step=1.0)
+            dv_nghiem_thu = st.selectbox(
+                "Đơn vị", config.THOI_GIAN_DON_VI_OPTIONS, index=don_vi_index, key="dv_nghiem_thu"
+            )
 
         ghi_chu = st.text_area("Ghi chú")
 
@@ -79,6 +90,9 @@ with tab_contract:
                     "thoi_gian_giao_hang_ngay": tg_giao_hang,
                     "thoi_gian_hoan_thanh_dv_ngay": tg_hoan_thanh_dv,
                     "thoi_gian_nghiem_thu_thanh_ly_ngay": tg_nghiem_thu,
+                    "thoi_gian_giao_hang_don_vi": dv_giao_hang,
+                    "thoi_gian_hoan_thanh_dv_don_vi": dv_hoan_thanh_dv,
+                    "thoi_gian_nghiem_thu_thanh_ly_don_vi": dv_nghiem_thu,
                     "nguon_von": nguon_von,
                     "ngay_thanh_ly_thuc_te": "",
                     "ngay_quyet_toan_thuc_te": "",
@@ -93,135 +107,226 @@ with tab_contract:
     st.subheader("Danh sách hợp đồng hiện có")
     st.dataframe(contracts_df, use_container_width=True, hide_index=True)
 
-# ---------------------------------------------------------------------------
+# =============================================================================
 with tab_items:
-    st.subheader("Thêm hạng mục hàng hóa/dịch vụ")
+    st.subheader("Danh mục hàng hóa, dịch vụ")
     if not contract_options:
         st.info("Chưa có hợp đồng nào. Vui lòng thêm hợp đồng ở tab 'Hợp đồng mới' trước.")
     else:
-        with st.form("form_new_item", clear_on_submit=True):
-            selected_label = st.selectbox("Chọn hợp đồng *", list(contract_options.keys()))
-            ten_hang_muc = st.text_input("Tên hạng mục *")
-            loai_hang_muc = st.selectbox("Loại hạng mục *", config.LOAI_HANG_MUC)
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                so_luong = st.number_input("Số lượng", min_value=0.0, step=1.0)
-                don_vi_tinh = st.text_input("Đơn vị tính")
-            with col2:
-                don_gia = st.number_input("Đơn giá", min_value=0.0, step=100000.0)
-                vat_percent = st.number_input("VAT (%)", min_value=0.0, max_value=100.0, value=10.0)
-            with col3:
-                thanh_tien = st.number_input(
-                    "Thành tiền (để trống = tự tính = SL x Đơn giá x (1+VAT%))", min_value=0.0, step=100000.0
-                )
-            ghi_chu_item = st.text_area("Ghi chú hạng mục")
+        selected_label = st.selectbox("Chọn hợp đồng *", list(contract_options.keys()), key="items_contract")
+        selected_contract_id = contract_options[selected_label]
 
-            submitted_item = st.form_submit_button("💾 Lưu hạng mục", type="primary")
-            if submitted_item:
-                if not ten_hang_muc:
-                    st.error("Vui lòng nhập tên hạng mục.")
-                else:
-                    contract_id = contract_options[selected_label]
+        all_items_df = sheets_client.read_sheet(config.SHEET_ITEMS)
+        contract_items = all_items_df[all_items_df["contract_id"].astype(str) == str(selected_contract_id)].copy()
+
+        # Chuẩn bị bảng hiển thị: giữ item_id ẩn để không mất liên kết với Delivery_Plan/Actual...
+        display_cols = [
+            "item_id", "ten_hang_muc", "loai_hang_muc", "so_luong", "don_vi_tinh",
+            "don_gia", "vat_percent", "thanh_tien", "ghi_chu",
+        ]
+        for c in display_cols:
+            if c not in contract_items.columns:
+                contract_items[c] = None
+        contract_items = contract_items[display_cols]
+
+        st.caption("Chỉnh sửa trực tiếp trên bảng, dùng dấu (+) ở cuối bảng để thêm dòng mới, "
+                   "hoặc chọn dòng rồi nhấn phím Delete để xóa.")
+
+        edited_items = st.data_editor(
+            contract_items,
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True,
+            key="editor_items",
+            column_config={
+                "item_id": None,  # ẩn cột, vẫn giữ dữ liệu
+                "ten_hang_muc": st.column_config.TextColumn("Tên hạng mục", required=True),
+                "loai_hang_muc": st.column_config.SelectboxColumn(
+                    "Loại hạng mục", options=config.LOAI_HANG_MUC, required=True
+                ),
+                "so_luong": st.column_config.NumberColumn("Số lượng", min_value=0.0, step=1.0),
+                "don_vi_tinh": st.column_config.TextColumn("Đơn vị tính"),
+                "don_gia": st.column_config.NumberColumn("Đơn giá", min_value=0.0, step=100000.0),
+                "vat_percent": st.column_config.NumberColumn("VAT (%)", min_value=0.0, max_value=100.0),
+                "thanh_tien": st.column_config.NumberColumn(
+                    "Thành tiền (để 0 = tự tính)", min_value=0.0, step=100000.0
+                ),
+                "ghi_chu": st.column_config.TextColumn("Ghi chú"),
+            },
+        )
+
+        if st.button("💾 Lưu danh mục hàng hóa/DV", type="primary", key="save_items"):
+            new_rows = []
+            for _, r in edited_items.iterrows():
+                if not r.get("ten_hang_muc"):
+                    continue  # bỏ qua dòng trống
+                item_id = r.get("item_id")
+                if not item_id or pd.isna(item_id):
                     item_id = f"ITEM-{uuid.uuid4().hex[:8].upper()}"
-                    final_thanh_tien = thanh_tien if thanh_tien > 0 else so_luong * don_gia * (1 + vat_percent / 100)
-                    row = {
-                        "contract_id": contract_id,
-                        "item_id": item_id,
-                        "ten_hang_muc": ten_hang_muc,
-                        "loai_hang_muc": loai_hang_muc,
-                        "so_luong": so_luong,
-                        "don_vi_tinh": don_vi_tinh,
-                        "don_gia": don_gia,
-                        "vat_percent": vat_percent,
-                        "thanh_tien": final_thanh_tien,
-                        "ghi_chu": ghi_chu_item,
-                    }
-                    sheets_client.append_row(config.SHEET_ITEMS, row)
-                    sheets_client.clear_cache()
-                    st.success(f"Đã lưu hạng mục: {ten_hang_muc}")
-                    st.rerun()
+                so_luong = float(r.get("so_luong") or 0)
+                don_gia = float(r.get("don_gia") or 0)
+                vat_percent = float(r.get("vat_percent") or 0)
+                thanh_tien = float(r.get("thanh_tien") or 0)
+                if thanh_tien <= 0:
+                    thanh_tien = so_luong * don_gia * (1 + vat_percent / 100)
+                new_rows.append({
+                    "contract_id": selected_contract_id,
+                    "item_id": item_id,
+                    "ten_hang_muc": r.get("ten_hang_muc"),
+                    "loai_hang_muc": r.get("loai_hang_muc") or config.LOAI_HANG_MUC[0],
+                    "so_luong": so_luong,
+                    "don_vi_tinh": r.get("don_vi_tinh") or "",
+                    "don_gia": don_gia,
+                    "vat_percent": vat_percent,
+                    "thanh_tien": thanh_tien,
+                    "ghi_chu": r.get("ghi_chu") or "",
+                })
+            sheets_client.replace_rows_for_contract(config.SHEET_ITEMS, selected_contract_id, new_rows)
+            sheets_client.clear_cache()
+            st.success(f"Đã lưu {len(new_rows)} hạng mục cho hợp đồng {selected_contract_id}.")
+            st.rerun()
 
-    st.divider()
-    st.subheader("Danh sách hạng mục hiện có")
-    items_df = sheets_client.read_sheet(config.SHEET_ITEMS)
-    st.dataframe(items_df, use_container_width=True, hide_index=True)
-
-# ---------------------------------------------------------------------------
-with tab_payment_plan:
-    st.subheader("Thêm kế hoạch tạm ứng/thanh toán")
+# =============================================================================
+with tab_delivery_plan:
+    st.subheader("Kế hoạch bàn giao / triển khai")
     if not contract_options:
         st.info("Chưa có hợp đồng nào. Vui lòng thêm hợp đồng trước.")
     else:
-        with st.form("form_payment_plan", clear_on_submit=True):
-            selected_label_pp = st.selectbox(
-                "Chọn hợp đồng *", list(contract_options.keys()), key="pp_contract"
+        selected_label_dp = st.selectbox("Chọn hợp đồng *", list(contract_options.keys()), key="dp_contract")
+        selected_contract_id_dp = contract_options[selected_label_dp]
+
+        items_of_contract = sheets_client.read_sheet(config.SHEET_ITEMS)
+        items_of_contract = items_of_contract[
+            items_of_contract["contract_id"].astype(str) == str(selected_contract_id_dp)
+        ]
+
+        if items_of_contract.empty:
+            st.warning(
+                "Hợp đồng này chưa có hạng mục nào. Vui lòng thêm danh mục hàng hóa/DV ở tab trước, "
+                "sau đó quay lại đây để lập kế hoạch bàn giao."
             )
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                dot_so = st.number_input("Đợt số", min_value=1, step=1)
-            with col2:
-                loai = st.selectbox("Loại", config.LOAI_THANH_TOAN)
-            with col3:
-                ngay_ke_hoach = st.date_input("Ngày kế hoạch")
-            so_tien_ke_hoach = st.number_input("Số tiền kế hoạch", min_value=0.0, step=1000000.0)
-            ghi_chu_pp = st.text_area("Ghi chú", key="pp_note")
+        else:
+            item_label_map = {}  # label -> item_id
+            for _, r in items_of_contract.iterrows():
+                label = f"{r['item_id']} - {r['ten_hang_muc']} ({r['loai_hang_muc']})"
+                item_label_map[label] = r["item_id"]
+            item_id_to_label = {v: k for k, v in item_label_map.items()}
 
-            submitted_pp = st.form_submit_button("💾 Lưu kế hoạch", type="primary")
-            if submitted_pp:
-                contract_id = contract_options[selected_label_pp]
-                row = {
-                    "contract_id": contract_id,
-                    "dot_so": dot_so,
-                    "loai": loai,
-                    "ngay_ke_hoach": ngay_ke_hoach.isoformat(),
-                    "so_tien_ke_hoach": so_tien_ke_hoach,
-                    "ghi_chu": ghi_chu_pp,
-                }
-                sheets_client.append_row(config.SHEET_PAYMENT_PLAN, row)
+            all_delivery_plan_df = sheets_client.read_sheet(config.SHEET_DELIVERY_PLAN)
+            contract_delivery_plan = all_delivery_plan_df[
+                all_delivery_plan_df["contract_id"].astype(str) == str(selected_contract_id_dp)
+            ].copy()
+
+            # Chuyển item_id -> label để hiển thị dễ hiểu trên bảng
+            contract_delivery_plan["Hạng mục"] = contract_delivery_plan["item_id"].map(item_id_to_label)
+            display_df = contract_delivery_plan[["Hạng mục", "ngay_ke_hoach", "so_luong_ke_hoach", "ghi_chu"]].copy()
+            display_df = display_df.rename(columns={
+                "ngay_ke_hoach": "Ngày kế hoạch", "so_luong_ke_hoach": "Số lượng kế hoạch", "ghi_chu": "Ghi chú",
+            })
+
+            st.caption("Chọn hạng mục cho từng dòng, thêm dòng bằng dấu (+) ở cuối bảng.")
+
+            edited_dp = st.data_editor(
+                display_df,
+                num_rows="dynamic",
+                use_container_width=True,
+                hide_index=True,
+                key="editor_delivery_plan",
+                column_config={
+                    "Hạng mục": st.column_config.SelectboxColumn(
+                        "Hạng mục", options=list(item_label_map.keys()), required=True
+                    ),
+                    "Ngày kế hoạch": st.column_config.TextColumn("Ngày kế hoạch (YYYY-MM-DD)"),
+                    "Số lượng kế hoạch": st.column_config.NumberColumn("Số lượng kế hoạch", min_value=0.0, step=1.0),
+                    "Ghi chú": st.column_config.TextColumn("Ghi chú"),
+                },
+            )
+
+            if st.button("💾 Lưu kế hoạch bàn giao", type="primary", key="save_delivery_plan"):
+                new_rows = []
+                for _, r in edited_dp.iterrows():
+                    label = r.get("Hạng mục")
+                    if not label or label not in item_label_map:
+                        continue
+                    matching_items = items_of_contract[items_of_contract["item_id"] == item_label_map[label]]
+                    loai = matching_items["loai_hang_muc"].values[0] if not matching_items.empty else ""
+                    new_rows.append({
+                        "contract_id": selected_contract_id_dp,
+                        "item_id": item_label_map[label],
+                        "loai": loai,
+                        "ngay_ke_hoach": str(r.get("Ngày kế hoạch") or ""),
+                        "so_luong_ke_hoach": float(r.get("Số lượng kế hoạch") or 0),
+                        "ghi_chu": r.get("Ghi chú") or "",
+                    })
+                sheets_client.replace_rows_for_contract(config.SHEET_DELIVERY_PLAN, selected_contract_id_dp, new_rows)
                 sheets_client.clear_cache()
-                st.success(f"Đã lưu kế hoạch {loai.lower()} đợt {dot_so}.")
+                st.success(f"Đã lưu {len(new_rows)} dòng kế hoạch bàn giao.")
                 st.rerun()
 
     st.divider()
-    st.subheader("Danh sách kế hoạch tạm ứng/thanh toán")
-    pp_df = sheets_client.read_sheet(config.SHEET_PAYMENT_PLAN)
-    st.dataframe(pp_df, use_container_width=True, hide_index=True)
+    st.subheader("Toàn bộ kế hoạch bàn giao (tất cả hợp đồng)")
+    st.dataframe(sheets_client.read_sheet(config.SHEET_DELIVERY_PLAN), use_container_width=True, hide_index=True)
 
-# ---------------------------------------------------------------------------
-with tab_delivery_plan:
-    st.subheader("Thêm kế hoạch bàn giao/triển khai")
-    items_df_for_plan = sheets_client.read_sheet(config.SHEET_ITEMS)
-    if items_df_for_plan.empty:
-        st.info("Chưa có hạng mục nào. Vui lòng thêm hạng mục ở tab 'Danh mục hàng hóa/DV' trước.")
+# =============================================================================
+with tab_payment_plan:
+    st.subheader("Kế hoạch tạm ứng / thanh toán")
+    if not contract_options:
+        st.info("Chưa có hợp đồng nào. Vui lòng thêm hợp đồng trước.")
     else:
-        item_options = {}
-        for _, row in items_df_for_plan.iterrows():
-            label = f"{row['item_id']} - {row['ten_hang_muc']} ({row['loai_hang_muc']}) [HĐ: {row['contract_id']}]"
-            item_options[label] = (row["contract_id"], row["item_id"], row["loai_hang_muc"])
+        selected_label_pp = st.selectbox("Chọn hợp đồng *", list(contract_options.keys()), key="pp_contract")
+        selected_contract_id_pp = contract_options[selected_label_pp]
 
-        with st.form("form_delivery_plan", clear_on_submit=True):
-            selected_item_label = st.selectbox("Chọn hạng mục *", list(item_options.keys()))
-            ngay_ke_hoach_dp = st.date_input("Ngày kế hoạch", key="dp_date")
-            so_luong_ke_hoach = st.number_input("Số lượng kế hoạch", min_value=0.0, step=1.0)
-            ghi_chu_dp = st.text_area("Ghi chú", key="dp_note")
+        all_payment_plan_df = sheets_client.read_sheet(config.SHEET_PAYMENT_PLAN)
+        contract_payment_plan = all_payment_plan_df[
+            all_payment_plan_df["contract_id"].astype(str) == str(selected_contract_id_pp)
+        ].copy()
 
-            submitted_dp = st.form_submit_button("💾 Lưu kế hoạch bàn giao", type="primary")
-            if submitted_dp:
-                contract_id, item_id, loai_hang_muc = item_options[selected_item_label]
-                row = {
-                    "contract_id": contract_id,
-                    "item_id": item_id,
-                    "loai": loai_hang_muc,
-                    "ngay_ke_hoach": ngay_ke_hoach_dp.isoformat(),
-                    "so_luong_ke_hoach": so_luong_ke_hoach,
-                    "ghi_chu": ghi_chu_dp,
-                }
-                sheets_client.append_row(config.SHEET_DELIVERY_PLAN, row)
-                sheets_client.clear_cache()
-                st.success("Đã lưu kế hoạch bàn giao.")
-                st.rerun()
+        display_cols_pp = ["dot_so", "loai", "ngay_ke_hoach", "so_tien_ke_hoach", "ghi_chu"]
+        for c in display_cols_pp:
+            if c not in contract_payment_plan.columns:
+                contract_payment_plan[c] = None
+        contract_payment_plan = contract_payment_plan[display_cols_pp].rename(columns={
+            "dot_so": "Đợt số", "loai": "Loại", "ngay_ke_hoach": "Ngày kế hoạch",
+            "so_tien_ke_hoach": "Số tiền kế hoạch", "ghi_chu": "Ghi chú",
+        })
+
+        st.caption("Thêm dòng bằng dấu (+) ở cuối bảng cho mỗi đợt tạm ứng/thanh toán.")
+
+        edited_pp = st.data_editor(
+            contract_payment_plan,
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True,
+            key="editor_payment_plan",
+            column_config={
+                "Đợt số": st.column_config.NumberColumn("Đợt số", min_value=1, step=1),
+                "Loại": st.column_config.SelectboxColumn("Loại", options=config.LOAI_THANH_TOAN, required=True),
+                "Ngày kế hoạch": st.column_config.TextColumn("Ngày kế hoạch (YYYY-MM-DD)"),
+                "Số tiền kế hoạch": st.column_config.NumberColumn(
+                    "Số tiền kế hoạch", min_value=0.0, step=1000000.0
+                ),
+                "Ghi chú": st.column_config.TextColumn("Ghi chú"),
+            },
+        )
+
+        if st.button("💾 Lưu kế hoạch tạm ứng/thanh toán", type="primary", key="save_payment_plan"):
+            new_rows = []
+            for i, r in edited_pp.iterrows():
+                if not r.get("Loại"):
+                    continue
+                new_rows.append({
+                    "contract_id": selected_contract_id_pp,
+                    "dot_so": int(r.get("Đợt số") or (i + 1)),
+                    "loai": r.get("Loại"),
+                    "ngay_ke_hoach": str(r.get("Ngày kế hoạch") or ""),
+                    "so_tien_ke_hoach": float(r.get("Số tiền kế hoạch") or 0),
+                    "ghi_chu": r.get("Ghi chú") or "",
+                })
+            sheets_client.replace_rows_for_contract(config.SHEET_PAYMENT_PLAN, selected_contract_id_pp, new_rows)
+            sheets_client.clear_cache()
+            st.success(f"Đã lưu {len(new_rows)} dòng kế hoạch tạm ứng/thanh toán.")
+            st.rerun()
 
     st.divider()
-    st.subheader("Danh sách kế hoạch bàn giao")
-    dp_df = sheets_client.read_sheet(config.SHEET_DELIVERY_PLAN)
-    st.dataframe(dp_df, use_container_width=True, hide_index=True)
+    st.subheader("Toàn bộ kế hoạch tạm ứng/thanh toán (tất cả hợp đồng)")
+    st.dataframe(sheets_client.read_sheet(config.SHEET_PAYMENT_PLAN), use_container_width=True, hide_index=True)
