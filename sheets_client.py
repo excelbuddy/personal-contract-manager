@@ -1,6 +1,13 @@
 """
-Module xử lý kết nối và đọc/ghi dữ liệu với Google Sheets bằng gspread + Service Account.
+Module xử lý kết nối và đọc/ghi dữ liệu với Google Sheets.
+
+- ĐỌC: ưu tiên đọc qua URL export CSV công khai của Google Sheets (không tốn
+  quota Google Sheets API, không cần xác thực) — yêu cầu Sheet được chia sẻ
+  "Anyone with the link - Viewer". Nếu đọc public thất bại, tự động fallback
+  sang đọc qua gspread (API, cần quyền của service account).
+- GHI: luôn dùng gspread + Service Account (bắt buộc phải có API để ghi).
 """
+import io
 import json
 
 import gspread
@@ -91,12 +98,43 @@ def ensure_sheets_exist():
                 ws.update("A1", [new_headers], value_input_option="USER_ENTERED")
 
 
-def read_sheet(sheet_name: str) -> pd.DataFrame:
-    """Đọc toàn bộ dữ liệu 1 sheet thành DataFrame."""
+def _public_csv_url(sheet_name: str) -> str:
+    """URL export CSV công khai — chỉ hoạt động nếu Sheet được share 'Anyone with the link - Viewer'."""
+    return (
+        f"https://docs.google.com/spreadsheets/d/{config.SPREADSHEET_ID}"
+        f"/gviz/tq?tqx=out:csv&sheet={sheet_name}"
+    )
+
+
+@st.cache_data(ttl=15, show_spinner=False)
+def _read_sheet_public(sheet_name: str) -> pd.DataFrame:
+    """Đọc 1 sheet qua URL CSV công khai (không tốn quota Google Sheets API)."""
+    url = _public_csv_url(sheet_name)
+    df = pd.read_csv(url, dtype=str, keep_default_na=False)
+    if df.empty and len(df.columns) == 0:
+        raise ValueError(f"Sheet '{sheet_name}' trống hoặc không đọc được qua URL công khai.")
+    return df
+
+
+def _read_sheet_via_api(sheet_name: str) -> pd.DataFrame:
+    """Đọc 1 sheet qua gspread (API) — dùng làm phương án dự phòng."""
     ss = get_spreadsheet()
     ws = ss.worksheet(sheet_name)
     records = ws.get_all_records()
-    df = pd.DataFrame(records)
+    return pd.DataFrame(records)
+
+
+def read_sheet(sheet_name: str) -> pd.DataFrame:
+    """
+    Đọc toàn bộ dữ liệu 1 sheet thành DataFrame.
+    Ưu tiên đọc qua URL công khai (không tốn quota API); nếu lỗi (sheet chưa
+    được share public, lỗi mạng...) thì tự động fallback sang đọc qua gspread.
+    """
+    try:
+        df = _read_sheet_public(sheet_name)
+    except Exception:
+        df = _read_sheet_via_api(sheet_name)
+
     # Đảm bảo đủ cột kể cả khi sheet đang trống
     expected_cols = config.SHEET_HEADERS.get(sheet_name, [])
     for col in expected_cols:
@@ -130,18 +168,25 @@ def replace_rows_for_contract(sheet_name: str, contract_id: str, new_rows: list)
     Ghi đè toàn bộ dữ liệu của 1 hợp đồng trong 1 sheet (dùng cho bảng động
     thêm/xóa dòng: Contract_Items, Delivery_Plan, Payment_Plan...).
 
-    Cách làm: giữ nguyên các dòng thuộc hợp đồng KHÁC, xóa hết dòng thuộc
-    contract_id này, rồi ghi lại new_rows (đã là danh sách dict đầy đủ).
+    Cách làm: đọc dữ liệu hiện có (ưu tiên qua URL công khai để tiết kiệm
+    quota), giữ nguyên các dòng thuộc hợp đồng KHÁC, rồi ghi đè sheet với
+    (dòng giữ lại + new_rows). Bước ghi luôn dùng gspread (API).
     """
+    headers = config.SHEET_HEADERS[sheet_name]
+    current_df = read_sheet(sheet_name)
+    if "contract_id" in current_df.columns:
+        kept_df = current_df[current_df["contract_id"].astype(str) != str(contract_id)]
+        kept = kept_df.to_dict("records")
+    else:
+        kept = []
+    combined = kept + new_rows
+
     ss = get_spreadsheet()
     ws = ss.worksheet(sheet_name)
-    headers = config.SHEET_HEADERS[sheet_name]
-    all_records = ws.get_all_records()
-    kept = [r for r in all_records if str(r.get("contract_id", "")) != str(contract_id)]
-    combined = kept + new_rows
     data = [headers] + [[row.get(h, "") for h in headers] for row in combined]
     ws.clear()
     ws.update("A1", data, value_input_option="USER_ENTERED")
+    _read_sheet_public.clear()
 
 
 def update_row_by_index(sheet_name: str, row_index: int, row_dict: dict):
@@ -163,7 +208,21 @@ def delete_row_by_index(sheet_name: str, row_index: int):
     ws.delete_rows(row_index + 2)
 
 
+def coerce_numeric(df: pd.DataFrame, columns: list) -> pd.DataFrame:
+    """
+    Ép các cột chỉ định về kiểu số (float), NaN -> 0.
+    Cần dùng trước khi đưa DataFrame vào st.data_editor với NumberColumn,
+    vì read_sheet() (đọc qua CSV công khai) trả về mọi cột dạng chuỗi.
+    """
+    df = df.copy()
+    for col in columns:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+    return df
+
+
 def clear_cache():
-    """Xóa cache để force đọc lại dữ liệu mới nhất từ Sheets."""
+    """Xóa cache để force đọc lại dữ liệu mới nhất (cả API client và CSV công khai)."""
     get_spreadsheet.clear()
     get_client.clear()
+    _read_sheet_public.clear()
