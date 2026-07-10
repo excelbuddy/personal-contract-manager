@@ -70,6 +70,7 @@ with tab_delivery:
             display_df = actual_for_contract[["Hạng mục", "ngay_thuc_te", "so_luong", "ghi_chu"]].rename(columns={
                 "ngay_thuc_te": "Ngày thực tế", "so_luong": "Số lượng", "ghi_chu": "Ghi chú",
             })
+            display_df = sheets_client.coerce_numeric(display_df, ["Số lượng"])
 
             edited = st.data_editor(
                 display_df,
@@ -141,6 +142,7 @@ with tab_acceptance:
                 "ngay_nghiem_thu": "Ngày nghiệm thu", "so_luong_nghiem_thu": "Số lượng",
                 "ket_qua": "Kết quả", "ghi_chu": "Ghi chú",
             })
+            display_acc_df = sheets_client.coerce_numeric(display_acc_df, ["Số lượng"])
 
             edited_acc = st.data_editor(
                 display_acc_df,
@@ -212,6 +214,7 @@ def _render_tien_tab(sheet_name: str, loai_loc: str, label: str, key_prefix: str
             "dot_so": "Đợt số", "ngay_don_vi_gui_ho_so": "Ngày gửi đủ hồ sơ",
             "ngay_gui_ke_toan": "Ngày gửi kế toán", "so_tien": "Số tiền", "ghi_chu": "Ghi chú",
         })
+        display_df = sheets_client.coerce_numeric(display_df, ["Đợt số", "Số tiền"])
 
         edited = st.data_editor(
             display_df,
