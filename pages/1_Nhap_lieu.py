@@ -128,6 +128,9 @@ with tab_items:
             if c not in contract_items.columns:
                 contract_items[c] = None
         contract_items = contract_items[display_cols]
+        contract_items = sheets_client.coerce_numeric(
+            contract_items, ["so_luong", "don_gia", "vat_percent", "thanh_tien"]
+        )
 
         st.caption("Chỉnh sửa trực tiếp trên bảng, dùng dấu (+) ở cuối bảng để thêm dòng mới, "
                    "hoặc chọn dòng rồi nhấn phím Delete để xóa.")
@@ -223,6 +226,7 @@ with tab_delivery_plan:
             display_df = display_df.rename(columns={
                 "ngay_ke_hoach": "Ngày kế hoạch", "so_luong_ke_hoach": "Số lượng kế hoạch", "ghi_chu": "Ghi chú",
             })
+            display_df = sheets_client.coerce_numeric(display_df, ["Số lượng kế hoạch"])
 
             st.caption("Chọn hạng mục cho từng dòng, thêm dòng bằng dấu (+) ở cuối bảng.")
 
@@ -289,6 +293,7 @@ with tab_payment_plan:
             "dot_so": "Đợt số", "loai": "Loại", "ngay_ke_hoach": "Ngày kế hoạch",
             "so_tien_ke_hoach": "Số tiền kế hoạch", "ghi_chu": "Ghi chú",
         })
+        contract_payment_plan = sheets_client.coerce_numeric(contract_payment_plan, ["Đợt số", "Số tiền kế hoạch"])
 
         st.caption("Thêm dòng bằng dấu (+) ở cuối bảng cho mỗi đợt tạm ứng/thanh toán.")
 
