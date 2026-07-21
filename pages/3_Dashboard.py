@@ -73,45 +73,89 @@ c4.metric("Sắp hết hạn (30 ngày)", sap_het_han)
 
 st.divider()
 
-# --- Bảng trạng thái chi tiết (giống mẫu ảnh) --------------------------------
+# --- Bảng trạng thái chi tiết (giống mẫu ảnh, hiển thị theo %) ---------------
 st.subheader("Bảng trạng thái hợp đồng")
 
 
-def _ky_hieu_mau(ky_hieu: str) -> str:
-    """Trả về icon màu cho ký hiệu o/x/...%/-"""
-    if ky_hieu == "o":
-        return "🟢 o"
-    if ky_hieu == "x":
-        return "🔴 x"
-    if ky_hieu == "-":
-        return "⚪ -"
-    return f"🟡 {ky_hieu}"
+def _cell_html(percent, khong_ap_dung: bool, cham: bool = False) -> str:
+    """
+    Trả về 1 ô <td> với màu nền theo ngưỡng:
+    - Không áp dụng -> nền trắng/xám nhạt, chữ '-'
+    - 0%   -> nền xám
+    - <100% -> nền vàng
+    - 100%  -> nền xanh lá
+    Kèm ⚠️ nếu chậm so với kế hoạch.
+    """
+    if khong_ap_dung:
+        bg, text = "#f0f0f0", "-"
+    elif percent is None:
+        bg, text = "#f0f0f0", "-"
+    elif percent <= 0:
+        bg, text = "#d9d9d9", "0%"
+    elif percent >= 100:
+        bg, text = "#a8d8a8", "100%"
+    else:
+        bg, text = "#ffe08a", f"{percent:g}%"
+
+    if cham:
+        text += " ⚠️"
+
+    return f'<td style="background-color:{bg}; text-align:center; padding:6px 10px;">{text}</td>'
 
 
-table_rows = []
+def _plain_cell(value) -> str:
+    return f'<td style="padding:6px 10px; white-space:nowrap;">{value if value is not None else ""}</td>'
+
+
+headers = [
+    "Hợp đồng", "Đối tác", "Ngày ký", "Hết hiệu lực", "Trạng thái HĐ",
+    "Giao hàng", "DV triển khai", "HTKT", "DV liên quan",
+    "Nghiệm thu", "Thanh lý", "Tạm ứng", "Thanh toán",
+]
+
+html_rows = []
 for s in filtered:
-    table_rows.append({
-        "Hợp đồng": f"{s['so_hop_dong'] or s['contract_id']} - {s['ten_hop_dong']}",
-        "Đối tác": s["ten_viet_tat_doi_tac"] or s["don_vi_doi_tac"],
-        "Ngày ký": s["ngay_ky"],
-        "Hết hiệu lực": s["ngay_het_hieu_luc"],
-        "Trạng thái HĐ": s["trang_thai_hop_dong"],
-        "Giao hàng": _ky_hieu_mau(s["giao_hang"]["ky_hieu"]) + (" ⚠️" if s["giao_hang"]["cham_tien_do"] else ""),
-        "DV triển khai": _ky_hieu_mau(s["dv_trien_khai"]["ky_hieu"]) + (" ⚠️" if s["dv_trien_khai"]["cham_tien_do"] else ""),
-        "HTKT": _ky_hieu_mau(s["htkt"]["ky_hieu"]) + (" ⚠️" if s["htkt"]["cham_tien_do"] else ""),
-        "DV liên quan": _ky_hieu_mau(s["dv_lien_quan"]["ky_hieu"]) + (" ⚠️" if s["dv_lien_quan"]["cham_tien_do"] else ""),
-        "Nghiệm thu": _ky_hieu_mau(s["nghiem_thu_ky_hieu"]),
-        "Thanh lý": _ky_hieu_mau(s["thanh_ly_ky_hieu"]),
-        "Tạm ứng": _ky_hieu_mau(s["tam_ung"]["ky_hieu"]) + (" ⚠️" if s["tam_ung"]["cham_tien_do"] else ""),
-        "Thanh toán": _ky_hieu_mau(s["thanh_toan"]["ky_hieu"]) + (" ⚠️" if s["thanh_toan"]["cham_tien_do"] else ""),
-    })
+    cells = [
+        _plain_cell(f"{s['so_hop_dong'] or s['contract_id']} - {s['ten_hop_dong']}"),
+        _plain_cell(s["ten_viet_tat_doi_tac"] or s["don_vi_doi_tac"]),
+        _plain_cell(s["ngay_ky"]),
+        _plain_cell(s["ngay_het_hieu_luc"]),
+        _plain_cell(s["trang_thai_hop_dong"]),
+        _cell_html(s["giao_hang"]["phan_tram_giao"], s["giao_hang"]["khong_ap_dung"], s["giao_hang"]["cham_tien_do"]),
+        _cell_html(
+            s["dv_trien_khai"]["phan_tram_giao"], s["dv_trien_khai"]["khong_ap_dung"],
+            s["dv_trien_khai"]["cham_tien_do"],
+        ),
+        _cell_html(s["htkt"]["phan_tram_giao"], s["htkt"]["khong_ap_dung"], s["htkt"]["cham_tien_do"]),
+        _cell_html(
+            s["dv_lien_quan"]["phan_tram_giao"], s["dv_lien_quan"]["khong_ap_dung"], s["dv_lien_quan"]["cham_tien_do"]
+        ),
+        _cell_html(s["phan_tram_nghiem_thu"], False, s["cham_nghiem_thu"]),
+        _cell_html(s["phan_tram_thanh_ly"], False, s["cham_thanh_ly"]),
+        _cell_html(s["tam_ung"]["phan_tram"], s["tam_ung"]["khong_ap_dung"], s["tam_ung"]["cham_tien_do"]),
+        _cell_html(s["thanh_toan"]["phan_tram"], s["thanh_toan"]["khong_ap_dung"], s["thanh_toan"]["cham_tien_do"]),
+    ]
+    html_rows.append(f"<tr>{''.join(cells)}</tr>")
 
-table_df = pd.DataFrame(table_rows)
-st.dataframe(table_df, use_container_width=True, hide_index=True)
+table_html = f"""
+<div style="overflow-x:auto;">
+<table style="border-collapse:collapse; width:100%; font-size:14px;">
+  <thead>
+    <tr>
+      {''.join(f'<th style="padding:6px 10px; text-align:left; border-bottom:2px solid #ccc; white-space:nowrap;">{h}</th>' for h in headers)}
+    </tr>
+  </thead>
+  <tbody>
+    {''.join(html_rows)}
+  </tbody>
+</table>
+</div>
+"""
+st.markdown(table_html, unsafe_allow_html=True)
 
 st.caption(
-    "🟢 o = Đã thực hiện · 🔴 x = Chưa thực hiện · ⚪ - = Không có kế hoạch · "
-    "🟡 ...(%) = Đã thực hiện một phần · ⚠️ = Chậm so với kế hoạch"
+    "⬜ Xám = 0% · 🟨 Vàng = đã thực hiện một phần (<100%) · 🟩 Xanh lá = 100% · "
+    "⚠️ = Chậm so với kế hoạch · '-' = Không áp dụng / không có kế hoạch"
 )
 
 st.divider()
