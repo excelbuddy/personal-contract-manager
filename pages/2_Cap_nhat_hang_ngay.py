@@ -8,6 +8,16 @@ import streamlit as st
 
 import config
 import sheets_client
+from date_utils import flexible_date_input, parse_flexible_date
+
+
+def _normalize_date_text(raw: str) -> str:
+    """Chuẩn hóa chuỗi ngày nhập tự do (kể cả kiểu tắt) về YYYY-MM-DD trước khi lưu."""
+    raw = str(raw or "").strip()
+    if not raw:
+        return ""
+    parsed = parse_flexible_date(raw)
+    return parsed.isoformat() if parsed else raw
 
 st.set_page_config(page_title="Cập nhật hàng ngày", page_icon="🔄", layout="wide")
 st.title("🔄 Cập nhật hàng ngày")
@@ -82,7 +92,9 @@ with tab_delivery:
                     "Hạng mục": st.column_config.SelectboxColumn(
                         "Hạng mục", options=list(item_label_map.keys()), required=True
                     ),
-                    "Ngày thực tế": st.column_config.TextColumn("Ngày thực tế (YYYY-MM-DD)"),
+                    "Ngày thực tế": st.column_config.TextColumn(
+                        "Ngày thực tế (YYYY-MM-DD hoặc 14may2025, 16feb)"
+                    ),
                     "Số lượng": st.column_config.NumberColumn("Số lượng", min_value=0.0, step=1.0),
                     "Ghi chú": st.column_config.TextColumn("Ghi chú"),
                 },
@@ -97,7 +109,7 @@ with tab_delivery:
                     new_rows.append({
                         "contract_id": selected_contract_id,
                         "item_id": item_label_map[label],
-                        "ngay_thuc_te": str(r.get("Ngày thực tế") or ""),
+                        "ngay_thuc_te": _normalize_date_text(r.get("Ngày thực tế")),
                         "so_luong": float(r.get("Số lượng") or 0),
                         "ghi_chu": r.get("Ghi chú") or "",
                     })
@@ -154,7 +166,9 @@ with tab_acceptance:
                     "Hạng mục": st.column_config.SelectboxColumn(
                         "Hạng mục", options=list(item_label_map.keys()), required=True
                     ),
-                    "Ngày nghiệm thu": st.column_config.TextColumn("Ngày nghiệm thu (YYYY-MM-DD)"),
+                    "Ngày nghiệm thu": st.column_config.TextColumn(
+                        "Ngày nghiệm thu (YYYY-MM-DD hoặc 14may2025, 16feb)"
+                    ),
                     "Số lượng": st.column_config.NumberColumn("Số lượng", min_value=0.0, step=1.0),
                     "Kết quả": st.column_config.SelectboxColumn(
                         "Kết quả", options=["Đạt", "Không đạt", "Đạt có điều kiện"]
@@ -172,7 +186,7 @@ with tab_acceptance:
                     new_rows.append({
                         "contract_id": selected_contract_id,
                         "item_id": item_label_map[label],
-                        "ngay_nghiem_thu": str(r.get("Ngày nghiệm thu") or ""),
+                        "ngay_nghiem_thu": _normalize_date_text(r.get("Ngày nghiệm thu")),
                         "so_luong_nghiem_thu": float(r.get("Số lượng") or 0),
                         "ket_qua": r.get("Kết quả") or "",
                         "ghi_chu": r.get("Ghi chú") or "",
@@ -224,8 +238,12 @@ def _render_tien_tab(sheet_name: str, loai_loc: str, label: str, key_prefix: str
             key=f"editor_{key_prefix}",
             column_config={
                 "Đợt số": st.column_config.NumberColumn("Đợt số", min_value=1, step=1),
-                "Ngày gửi đủ hồ sơ": st.column_config.TextColumn("Ngày gửi đủ hồ sơ (YYYY-MM-DD)"),
-                "Ngày gửi kế toán": st.column_config.TextColumn("Ngày gửi kế toán (YYYY-MM-DD)"),
+                "Ngày gửi đủ hồ sơ": st.column_config.TextColumn(
+                    "Ngày gửi đủ hồ sơ (YYYY-MM-DD hoặc 14may2025, 16feb)"
+                ),
+                "Ngày gửi kế toán": st.column_config.TextColumn(
+                    "Ngày gửi kế toán (YYYY-MM-DD hoặc 14may2025, 16feb)"
+                ),
                 "Số tiền": st.column_config.NumberColumn("Số tiền", min_value=0.0, step=1000000.0),
                 "Ghi chú": st.column_config.TextColumn("Ghi chú"),
             },
@@ -240,8 +258,8 @@ def _render_tien_tab(sheet_name: str, loai_loc: str, label: str, key_prefix: str
                 new_rows.append({
                     "contract_id": selected_contract_id,
                     "dot_so": int(r.get("Đợt số") or (i + 1)),
-                    "ngay_don_vi_gui_ho_so": str(r.get("Ngày gửi đủ hồ sơ") or ""),
-                    "ngay_gui_ke_toan": str(r.get("Ngày gửi kế toán") or ""),
+                    "ngay_don_vi_gui_ho_so": _normalize_date_text(r.get("Ngày gửi đủ hồ sơ")),
+                    "ngay_gui_ke_toan": _normalize_date_text(r.get("Ngày gửi kế toán")),
                     "so_tien": float(so_tien or 0),
                     "ghi_chu": r.get("Ghi chú") or "",
                 })
@@ -260,18 +278,21 @@ with tab_payment:
 # =============================================================================
 with tab_amendment:
     st.subheader("Ghi nhận sửa đổi hợp đồng")
-    with st.form("form_amendment", clear_on_submit=True):
-        ngay_sua_doi = st.date_input("Ngày sửa đổi", value=date.today(), key="am_date")
-        loai_sua_doi = st.selectbox(
-            "Loại sửa đổi",
-            ["Giá trị hạng mục", "Thuế", "Ngày hiệu lực", "Thời gian thực hiện", "Khác"],
-            key="am_type",
-        )
-        noi_dung_cu = st.text_area("Nội dung cũ", key="am_old")
-        noi_dung_moi = st.text_area("Nội dung mới", key="am_new")
-        ghi_chu_am = st.text_area("Ghi chú", key="am_note")
 
-        if st.form_submit_button("💾 Lưu sửa đổi", type="primary"):
+    ngay_sua_doi = flexible_date_input("Ngày sửa đổi", key="am_date", default=date.today())
+    loai_sua_doi = st.selectbox(
+        "Loại sửa đổi",
+        ["Giá trị hạng mục", "Thuế", "Ngày hiệu lực", "Thời gian thực hiện", "Khác"],
+        key="am_type",
+    )
+    noi_dung_cu = st.text_area("Nội dung cũ", key="am_old")
+    noi_dung_moi = st.text_area("Nội dung mới", key="am_new")
+    ghi_chu_am = st.text_area("Ghi chú", key="am_note")
+
+    if st.button("💾 Lưu sửa đổi", type="primary", key="save_amendment"):
+        if not ngay_sua_doi:
+            st.error("Ngày sửa đổi không hợp lệ, vui lòng kiểm tra lại định dạng đã nhập.")
+        else:
             row = {
                 "contract_id": selected_contract_id,
                 "ngay_sua_doi": ngay_sua_doi.isoformat(),
@@ -288,6 +309,8 @@ with tab_amendment:
                 "hãy vào trang 'Nhập liệu' > tab 'Hợp đồng mới' để cập nhật trực tiếp "
                 "dòng hợp đồng tương ứng trên Google Sheet."
             )
+            for k in ["am_date__text", "am_old", "am_new", "am_note"]:
+                st.session_state.pop(k, None)
             st.rerun()
 
     st.divider()
