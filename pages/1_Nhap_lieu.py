@@ -10,6 +10,16 @@ import streamlit as st
 
 import config
 import sheets_client
+from date_utils import flexible_date_input, parse_flexible_date
+
+
+def _normalize_date_text(raw: str) -> str:
+    """Chuẩn hóa chuỗi ngày nhập tự do (kể cả kiểu tắt) về YYYY-MM-DD trước khi lưu."""
+    raw = str(raw or "").strip()
+    if not raw:
+        return ""
+    parsed = parse_flexible_date(raw)
+    return parsed.isoformat() if parsed else raw
 
 st.set_page_config(page_title="Nhập liệu Hợp đồng", page_icon="✍️", layout="wide")
 st.title("✍️ Nhập liệu Hợp đồng")
@@ -28,80 +38,94 @@ if not contracts_df.empty:
 # =============================================================================
 with tab_contract:
     st.subheader("Thêm hợp đồng mới")
-    with st.form("form_new_contract", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        with col1:
-            ten_hop_dong = st.text_input("Tên hợp đồng *")
-            so_hop_dong = st.text_input("Số hợp đồng *")
-            don_vi_doi_tac = st.text_input("Tên đơn vị đối tác *")
-            ten_viet_tat = st.text_input("Tên viết tắt đối tác")
-            don_vi_tien_te = st.selectbox("Đơn vị tiền tệ", config.DON_VI_TIEN_TE)
-            nguon_von = st.selectbox("Nguồn vốn", config.NGUON_VON_OPTIONS)
-        with col2:
-            gia_tri_truoc_vat = st.number_input("Giá trị trước VAT", min_value=0.0, step=1000000.0)
-            vat = st.number_input("VAT (số tiền)", min_value=0.0, step=100000.0)
-            gia_tri_sau_vat = st.number_input(
-                "Giá trị sau VAT (để trống = tự tính = trước VAT + VAT)", min_value=0.0, step=1000000.0
-            )
-            ngay_ky = st.date_input("Ngày ký hợp đồng *", value=date.today())
-            ngay_hieu_luc = st.date_input("Ngày hiệu lực hợp đồng *", value=date.today())
 
-        st.markdown("**Thời gian thực hiện** (chọn đơn vị: Ngày / Tháng / Năm — mặc định Tháng)")
-        don_vi_index = config.THOI_GIAN_DON_VI_OPTIONS.index(config.THOI_GIAN_DON_VI_MAC_DINH)
+    col1, col2 = st.columns(2)
+    with col1:
+        ten_hop_dong = st.text_input("Tên hợp đồng *", key="new_ten_hop_dong")
+        so_hop_dong = st.text_input("Số hợp đồng *", key="new_so_hop_dong")
+        don_vi_doi_tac = st.text_input("Tên đơn vị đối tác *", key="new_don_vi_doi_tac")
+        ten_viet_tat = st.text_input("Tên viết tắt đối tác", key="new_ten_viet_tat")
+        don_vi_tien_te = st.selectbox("Đơn vị tiền tệ", config.DON_VI_TIEN_TE, key="new_don_vi_tien_te")
+        nguon_von = st.selectbox("Nguồn vốn", config.NGUON_VON_OPTIONS, key="new_nguon_von")
+    with col2:
+        gia_tri_truoc_vat = st.number_input(
+            "Giá trị trước VAT", min_value=0.0, step=1000000.0, key="new_gia_tri_truoc_vat"
+        )
+        vat = st.number_input("VAT (số tiền)", min_value=0.0, step=100000.0, key="new_vat")
+        gia_tri_sau_vat = st.number_input(
+            "Giá trị sau VAT (để trống = tự tính = trước VAT + VAT)", min_value=0.0, step=1000000.0,
+            key="new_gia_tri_sau_vat",
+        )
+        ngay_ky = flexible_date_input("Ngày ký hợp đồng *", key="new_ngay_ky", default=date.today())
+        ngay_hieu_luc = flexible_date_input("Ngày hiệu lực hợp đồng *", key="new_ngay_hieu_luc", default=date.today())
 
-        col3, col4, col5 = st.columns(3)
-        with col3:
-            tg_giao_hang = st.number_input("Bàn giao hàng hóa", min_value=0.0, step=1.0)
-            dv_giao_hang = st.selectbox(
-                "Đơn vị", config.THOI_GIAN_DON_VI_OPTIONS, index=don_vi_index, key="dv_giao_hang"
-            )
-        with col4:
-            tg_hoan_thanh_dv = st.number_input("Hoàn thành dịch vụ", min_value=0.0, step=1.0)
-            dv_hoan_thanh_dv = st.selectbox(
-                "Đơn vị", config.THOI_GIAN_DON_VI_OPTIONS, index=don_vi_index, key="dv_hoan_thanh_dv"
-            )
-        with col5:
-            tg_nghiem_thu = st.number_input("Nghiệm thu/thanh lý", min_value=0.0, step=1.0)
-            dv_nghiem_thu = st.selectbox(
-                "Đơn vị", config.THOI_GIAN_DON_VI_OPTIONS, index=don_vi_index, key="dv_nghiem_thu"
-            )
+    st.markdown("**Thời gian thực hiện** (chọn đơn vị: Ngày / Tháng / Năm — mặc định Tháng)")
+    don_vi_index = config.THOI_GIAN_DON_VI_OPTIONS.index(config.THOI_GIAN_DON_VI_MAC_DINH)
 
-        ghi_chu = st.text_area("Ghi chú")
+    col3, col4, col5 = st.columns(3)
+    with col3:
+        tg_giao_hang = st.number_input("Bàn giao hàng hóa", min_value=0.0, step=1.0, key="new_tg_giao_hang")
+        dv_giao_hang = st.selectbox(
+            "Đơn vị", config.THOI_GIAN_DON_VI_OPTIONS, index=don_vi_index, key="new_dv_giao_hang"
+        )
+    with col4:
+        tg_hoan_thanh_dv = st.number_input(
+            "Hoàn thành dịch vụ", min_value=0.0, step=1.0, key="new_tg_hoan_thanh_dv"
+        )
+        dv_hoan_thanh_dv = st.selectbox(
+            "Đơn vị", config.THOI_GIAN_DON_VI_OPTIONS, index=don_vi_index, key="new_dv_hoan_thanh_dv"
+        )
+    with col5:
+        tg_nghiem_thu = st.number_input("Nghiệm thu/thanh lý", min_value=0.0, step=1.0, key="new_tg_nghiem_thu")
+        dv_nghiem_thu = st.selectbox(
+            "Đơn vị", config.THOI_GIAN_DON_VI_OPTIONS, index=don_vi_index, key="new_dv_nghiem_thu"
+        )
 
-        submitted = st.form_submit_button("💾 Lưu hợp đồng", type="primary")
-        if submitted:
-            if not ten_hop_dong or not so_hop_dong or not don_vi_doi_tac:
-                st.error("Vui lòng điền đủ các trường bắt buộc (*).")
-            else:
-                new_id = f"HD-{uuid.uuid4().hex[:8].upper()}"
-                gia_tri_final = gia_tri_sau_vat if gia_tri_sau_vat > 0 else (gia_tri_truoc_vat + vat)
-                row = {
-                    "contract_id": new_id,
-                    "ten_hop_dong": ten_hop_dong,
-                    "so_hop_dong": so_hop_dong,
-                    "don_vi_doi_tac": don_vi_doi_tac,
-                    "ten_viet_tat_doi_tac": ten_viet_tat,
-                    "gia_tri_truoc_vat": gia_tri_truoc_vat,
-                    "vat": vat,
-                    "gia_tri_sau_vat": gia_tri_final,
-                    "don_vi_tien_te": don_vi_tien_te,
-                    "ngay_ky": ngay_ky.isoformat(),
-                    "ngay_hieu_luc": ngay_hieu_luc.isoformat(),
-                    "thoi_gian_giao_hang_ngay": tg_giao_hang,
-                    "thoi_gian_hoan_thanh_dv_ngay": tg_hoan_thanh_dv,
-                    "thoi_gian_nghiem_thu_thanh_ly_ngay": tg_nghiem_thu,
-                    "thoi_gian_giao_hang_don_vi": dv_giao_hang,
-                    "thoi_gian_hoan_thanh_dv_don_vi": dv_hoan_thanh_dv,
-                    "thoi_gian_nghiem_thu_thanh_ly_don_vi": dv_nghiem_thu,
-                    "nguon_von": nguon_von,
-                    "ngay_thanh_ly_thuc_te": "",
-                    "ngay_quyet_toan_thuc_te": "",
-                    "ghi_chu": ghi_chu,
-                }
-                sheets_client.append_row(config.SHEET_CONTRACTS, row)
-                sheets_client.clear_cache()
-                st.success(f"Đã lưu hợp đồng mới: {new_id} - {ten_hop_dong}")
-                st.rerun()
+    ghi_chu = st.text_area("Ghi chú", key="new_ghi_chu")
+
+    if st.button("💾 Lưu hợp đồng", type="primary", key="save_new_contract"):
+        if not ten_hop_dong or not so_hop_dong or not don_vi_doi_tac:
+            st.error("Vui lòng điền đủ các trường bắt buộc (*).")
+        elif not ngay_ky or not ngay_hieu_luc:
+            st.error("Ngày ký / Ngày hiệu lực không hợp lệ, vui lòng kiểm tra lại định dạng đã nhập.")
+        else:
+            new_id = f"HD-{uuid.uuid4().hex[:8].upper()}"
+            gia_tri_final = gia_tri_sau_vat if gia_tri_sau_vat > 0 else (gia_tri_truoc_vat + vat)
+            row = {
+                "contract_id": new_id,
+                "ten_hop_dong": ten_hop_dong,
+                "so_hop_dong": so_hop_dong,
+                "don_vi_doi_tac": don_vi_doi_tac,
+                "ten_viet_tat_doi_tac": ten_viet_tat,
+                "gia_tri_truoc_vat": gia_tri_truoc_vat,
+                "vat": vat,
+                "gia_tri_sau_vat": gia_tri_final,
+                "don_vi_tien_te": don_vi_tien_te,
+                "ngay_ky": ngay_ky.isoformat(),
+                "ngay_hieu_luc": ngay_hieu_luc.isoformat(),
+                "thoi_gian_giao_hang_ngay": tg_giao_hang,
+                "thoi_gian_hoan_thanh_dv_ngay": tg_hoan_thanh_dv,
+                "thoi_gian_nghiem_thu_thanh_ly_ngay": tg_nghiem_thu,
+                "thoi_gian_giao_hang_don_vi": dv_giao_hang,
+                "thoi_gian_hoan_thanh_dv_don_vi": dv_hoan_thanh_dv,
+                "thoi_gian_nghiem_thu_thanh_ly_don_vi": dv_nghiem_thu,
+                "nguon_von": nguon_von,
+                "ngay_thanh_ly_thuc_te": "",
+                "ngay_quyet_toan_thuc_te": "",
+                "ghi_chu": ghi_chu,
+            }
+            sheets_client.append_row(config.SHEET_CONTRACTS, row)
+            sheets_client.clear_cache()
+            st.success(f"Đã lưu hợp đồng mới: {new_id} - {ten_hop_dong}")
+            # Xóa các key nhập liệu để làm trống form cho lần nhập tiếp theo
+            for k in [
+                "new_ten_hop_dong", "new_so_hop_dong", "new_don_vi_doi_tac", "new_ten_viet_tat",
+                "new_gia_tri_truoc_vat", "new_vat", "new_gia_tri_sau_vat", "new_ghi_chu",
+                "new_ngay_ky__text", "new_ngay_hieu_luc__text",
+                "new_tg_giao_hang", "new_tg_hoan_thanh_dv", "new_tg_nghiem_thu",
+            ]:
+                st.session_state.pop(k, None)
+            st.rerun()
 
     st.divider()
     st.subheader("Danh sách hợp đồng hiện có")
@@ -240,7 +264,9 @@ with tab_delivery_plan:
                     "Hạng mục": st.column_config.SelectboxColumn(
                         "Hạng mục", options=list(item_label_map.keys()), required=True
                     ),
-                    "Ngày kế hoạch": st.column_config.TextColumn("Ngày kế hoạch (YYYY-MM-DD)"),
+                    "Ngày kế hoạch": st.column_config.TextColumn(
+                        "Ngày kế hoạch (YYYY-MM-DD hoặc 14may2025, 16feb)"
+                    ),
                     "Số lượng kế hoạch": st.column_config.NumberColumn("Số lượng kế hoạch", min_value=0.0, step=1.0),
                     "Ghi chú": st.column_config.TextColumn("Ghi chú"),
                 },
@@ -258,7 +284,7 @@ with tab_delivery_plan:
                         "contract_id": selected_contract_id_dp,
                         "item_id": item_label_map[label],
                         "loai": loai,
-                        "ngay_ke_hoach": str(r.get("Ngày kế hoạch") or ""),
+                        "ngay_ke_hoach": _normalize_date_text(r.get("Ngày kế hoạch")),
                         "so_luong_ke_hoach": float(r.get("Số lượng kế hoạch") or 0),
                         "ghi_chu": r.get("Ghi chú") or "",
                     })
@@ -306,7 +332,9 @@ with tab_payment_plan:
             column_config={
                 "Đợt số": st.column_config.NumberColumn("Đợt số", min_value=1, step=1),
                 "Loại": st.column_config.SelectboxColumn("Loại", options=config.LOAI_THANH_TOAN, required=True),
-                "Ngày kế hoạch": st.column_config.TextColumn("Ngày kế hoạch (YYYY-MM-DD)"),
+                "Ngày kế hoạch": st.column_config.TextColumn(
+                    "Ngày kế hoạch (YYYY-MM-DD hoặc 14may2025, 16feb)"
+                ),
                 "Số tiền kế hoạch": st.column_config.NumberColumn(
                     "Số tiền kế hoạch", min_value=0.0, step=1000000.0
                 ),
@@ -323,7 +351,7 @@ with tab_payment_plan:
                     "contract_id": selected_contract_id_pp,
                     "dot_so": int(r.get("Đợt số") or (i + 1)),
                     "loai": r.get("Loại"),
-                    "ngay_ke_hoach": str(r.get("Ngày kế hoạch") or ""),
+                    "ngay_ke_hoach": _normalize_date_text(r.get("Ngày kế hoạch")),
                     "so_tien_ke_hoach": float(r.get("Số tiền kế hoạch") or 0),
                     "ghi_chu": r.get("Ghi chú") or "",
                 })
