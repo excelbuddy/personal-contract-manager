@@ -103,11 +103,12 @@ def compute_trang_thai_tien(contract_id: str, gia_tri_tong: float, plan_df: pd.D
 
     if plan_rows.empty:
         return {"da_thuc_hien": 0, "con_lai": 0, "phan_tram": 0,
-                "ky_hieu": "-", "cham_tien_do": False}
+                "ky_hieu": "-", "cham_tien_do": False, "khong_ap_dung": True}
 
     tong_ke_hoach = sum(_to_number(v) for v in plan_rows["so_tien_ke_hoach"])
     tong_thuc_te = sum(_to_number(v) for v in actual_rows["so_tien"])
-    phan_tram = round((tong_thuc_te / tong_ke_hoach * 100), 1) if tong_ke_hoach else 0
+    phan_tram_raw = round((tong_thuc_te / tong_ke_hoach * 100), 1) if tong_ke_hoach else 0
+    phan_tram = min(phan_tram_raw, 100)
     con_lai = max(tong_ke_hoach - tong_thuc_te, 0)
 
     # Xác định ký hiệu hiển thị trên dashboard
@@ -132,6 +133,7 @@ def compute_trang_thai_tien(contract_id: str, gia_tri_tong: float, plan_df: pd.D
         "phan_tram": phan_tram,
         "ky_hieu": ky_hieu,
         "cham_tien_do": cham,
+        "khong_ap_dung": False,
     }
 
 
@@ -141,14 +143,25 @@ def compute_trang_thai_hang_muc(contract_id: str, loai_hang_muc: str, items_df: 
     """
     Dùng chung cho: Giao hàng / DV triển khai / HTKT / DV liên quan.
     So sánh tổng số lượng kế hoạch vs thực tế giao vs thực tế nghiệm thu, cho các item thuộc loại_hang_muc.
-    Trả về: {trang_thai: 'Chưa bàn giao'/'Đã bàn giao'/'Đã nghiệm thu', ky_hieu: o/x, cham_tien_do: bool}
+    Trả về: {
+        "khong_ap_dung": bool,
+        "phan_tram_giao": % bàn giao (None nếu không áp dụng),
+        "phan_tram_nghiem_thu": % nghiệm thu (None nếu không áp dụng),
+        "cham_tien_do": bool,
+        "tong_ke_hoach": số lượng kế hoạch (dùng để cộng dồn ở mức hợp đồng),
+        "tong_da_giao": số lượng đã giao,
+        "tong_da_nghiem_thu": số lượng đã nghiệm thu,
+    }
     """
     items = items_df[
         (items_df["contract_id"].astype(str) == str(contract_id))
         & (items_df["loai_hang_muc"] == loai_hang_muc)
     ]
     if items.empty:
-        return {"trang_thai": "Không áp dụng", "ky_hieu": "-", "cham_tien_do": False}
+        return {
+            "khong_ap_dung": True, "phan_tram_giao": None, "phan_tram_nghiem_thu": None,
+            "cham_tien_do": False, "tong_ke_hoach": 0, "tong_da_giao": 0, "tong_da_nghiem_thu": 0,
+        }
 
     item_ids = set(items["item_id"].astype(str))
 
@@ -171,28 +184,30 @@ def compute_trang_thai_hang_muc(contract_id: str, loai_hang_muc: str, items_df: 
     tong_da_giao = sum(_to_number(v) for v in delivered_rows["so_luong"])
     tong_da_nghiem_thu = sum(_to_number(v) for v in accepted_rows["so_luong_nghiem_thu"])
 
-    da_ban_giao = tong_ke_hoach > 0 and tong_da_giao >= tong_ke_hoach
-    da_nghiem_thu = tong_ke_hoach > 0 and tong_da_nghiem_thu >= tong_ke_hoach
-
-    if da_nghiem_thu:
-        trang_thai = "Đã nghiệm thu"
-        ky_hieu = "o"
-    elif da_ban_giao:
-        trang_thai = "Đã bàn giao (chưa nghiệm thu)"
-        ky_hieu = "o"
+    if tong_ke_hoach > 0:
+        phan_tram_giao = round(min(tong_da_giao / tong_ke_hoach * 100, 100), 1)
+        phan_tram_nghiem_thu = round(min(tong_da_nghiem_thu / tong_ke_hoach * 100, 100), 1)
     else:
-        trang_thai = "Chưa bàn giao"
-        ky_hieu = "x"
+        phan_tram_giao = 0
+        phan_tram_nghiem_thu = 0
 
     # Kiểm tra chậm: có kế hoạch quá hạn mà chưa bàn giao đủ
     cham = False
     for _, plan_row in plan_rows.iterrows():
         ngay_kh = _to_date(plan_row.get("ngay_ke_hoach"))
-        if ngay_kh and TODAY > ngay_kh and not da_ban_giao:
+        if ngay_kh and TODAY > ngay_kh and phan_tram_giao < 100:
             cham = True
             break
 
-    return {"trang_thai": trang_thai, "ky_hieu": ky_hieu, "cham_tien_do": cham}
+    return {
+        "khong_ap_dung": False,
+        "phan_tram_giao": phan_tram_giao,
+        "phan_tram_nghiem_thu": phan_tram_nghiem_thu,
+        "cham_tien_do": cham,
+        "tong_ke_hoach": tong_ke_hoach,
+        "tong_da_giao": tong_da_giao,
+        "tong_da_nghiem_thu": tong_da_nghiem_thu,
+    }
 
 
 def build_contract_summary(contract_row: dict, items_df: pd.DataFrame, payment_plan_df: pd.DataFrame,
@@ -224,11 +239,28 @@ def build_contract_summary(contract_row: dict, items_df: pd.DataFrame, payment_p
         contract_id, "DV liên quan", items_df, delivery_plan_df, actual_deliveries_df, actual_acceptance_df
     )
 
-    # Nghiệm thu tổng hợp: tất cả các nhóm áp dụng đều phải "Đã nghiệm thu"
-    nhom_ap_dung = [g for g in [giao_hang, dv_trien_khai, htkt, dv_lien_quan] if g["trang_thai"] != "Không áp dụng"]
-    da_nghiem_thu_tat_ca = all(g["trang_thai"] == "Đã nghiệm thu" for g in nhom_ap_dung) if nhom_ap_dung else False
+    # Nghiệm thu tổng hợp: tổng số lượng đã nghiệm thu / tổng số lượng kế hoạch,
+    # cộng dồn qua tất cả các nhóm hạng mục áp dụng (Hàng hóa, DV triển khai, HTKT, DV liên quan)
+    nhom_list = [giao_hang, dv_trien_khai, htkt, dv_lien_quan]
+    nhom_ap_dung = [g for g in nhom_list if not g["khong_ap_dung"]]
+    tong_ke_hoach_all = sum(g["tong_ke_hoach"] for g in nhom_ap_dung)
+    tong_da_nghiem_thu_all = sum(g["tong_da_nghiem_thu"] for g in nhom_ap_dung)
+    if tong_ke_hoach_all > 0:
+        phan_tram_nghiem_thu_tong = round(min(tong_da_nghiem_thu_all / tong_ke_hoach_all * 100, 100), 1)
+    else:
+        phan_tram_nghiem_thu_tong = 0
 
     ngay_thanh_ly = _to_date(contract_row.get("ngay_thanh_ly_thuc_te"))
+    da_thanh_ly = ngay_thanh_ly is not None
+    phan_tram_thanh_ly = 100 if da_thanh_ly else 0
+
+    # Chậm nghiệm thu / thanh lý: quá ngày hết hiệu lực mà vẫn chưa xong
+    cham_nghiem_thu = bool(
+        ngay_het_hieu_luc and TODAY > ngay_het_hieu_luc and phan_tram_nghiem_thu_tong < 100
+    )
+    cham_thanh_ly = bool(
+        ngay_het_hieu_luc and TODAY > ngay_het_hieu_luc and not da_thanh_ly
+    )
 
     return {
         "contract_id": contract_id,
@@ -247,8 +279,10 @@ def build_contract_summary(contract_row: dict, items_df: pd.DataFrame, payment_p
         "dv_trien_khai": dv_trien_khai,
         "htkt": htkt,
         "dv_lien_quan": dv_lien_quan,
-        "nghiem_thu_ky_hieu": "o" if da_nghiem_thu_tat_ca else "x",
-        "thanh_ly_ky_hieu": "o" if ngay_thanh_ly else "x",
+        "phan_tram_nghiem_thu": phan_tram_nghiem_thu_tong,
+        "cham_nghiem_thu": cham_nghiem_thu,
+        "phan_tram_thanh_ly": phan_tram_thanh_ly,
+        "cham_thanh_ly": cham_thanh_ly,
         "tam_ung": tam_ung,
         "thanh_toan": thanh_toan,
     }
